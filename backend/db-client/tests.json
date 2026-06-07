@@ -1,0 +1,22 @@
+{
+  "tests": [
+    {
+      "name": "Ping project DB",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "ping", "dsn": "project"},
+      "expectedStatus": 200,
+      "expectedBody": {"status": "connected"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Run simple query",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "query", "dsn": "project", "sql": "SELECT 1 AS n"},
+      "expectedStatus": 200,
+      "expectedBody": {"rowCount": 1},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

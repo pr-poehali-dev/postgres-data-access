@@ -67,19 +67,40 @@ function StatusDot({ status }: { status: Connection["status"] }) {
 
 // ─── Connection Item ──────────────────────────────────────────────────────────
 
-function ConnectionItem({ conn, selected, onClick }: { conn: Connection; selected: boolean; onClick: () => void }) {
+function ConnectionItem({ conn, selected, onClick, onEdit, onDelete }: { conn: Connection; selected: boolean; onClick: () => void; onEdit: () => void; onDelete: () => void }) {
+  const isProject = conn.id === "project";
   return (
-    <button
+    <div
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition-all ${selected ? "bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]" : "hover:bg-[hsl(220,13%,13%)] text-[hsl(var(--sidebar-foreground))]"}`}
+      className={`group w-full text-left px-3 py-2 flex items-center gap-2.5 transition-all cursor-pointer ${selected ? "bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]" : "hover:bg-[hsl(220,13%,13%)] text-[hsl(var(--sidebar-foreground))]"}`}
     >
       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: conn.color }} />
       <div className="flex-1 min-w-0">
         <div className="font-medium text-xs truncate">{conn.name}</div>
         <div className="font-mono-app text-[10px] text-[hsl(var(--muted-foreground))] truncate">{conn.host}/{conn.database}</div>
       </div>
-      <StatusDot status={conn.status} />
-    </button>
+      {!isProject && (
+        <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={e => { e.stopPropagation(); onEdit(); }}
+            className="p-0.5 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] transition-colors"
+            title="Редактировать"
+          >
+            <Icon name="Pencil" size={11} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            className="p-0.5 text-[hsl(var(--muted-foreground))] hover:text-red-400 transition-colors"
+            title="Удалить"
+          >
+            <Icon name="Trash2" size={11} />
+          </button>
+        </div>
+      )}
+      <div className="group-hover:hidden">
+        <StatusDot status={conn.status} />
+      </div>
+    </div>
   );
 }
 
@@ -413,8 +434,24 @@ function TableEditor({ dsn, schema, tableName }: { dsn: string; schema: string; 
 
 // ─── Add Connection Modal ─────────────────────────────────────────────────────
 
-function AddConnectionModal({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Connection) => void }) {
-  const [form, setForm] = useState({ name: "", host: "localhost", port: "5432", database: "", user: "postgres", password: "", color: "#3b82f6" });
+function parseDsn(dsn: string) {
+  try {
+    const u = new URL(dsn);
+    return {
+      host: u.hostname, port: u.port || "5432",
+      database: u.pathname.replace(/^\//, ""),
+      user: decodeURIComponent(u.username), password: decodeURIComponent(u.password),
+    };
+  } catch {
+    return { host: "localhost", port: "5432", database: "", user: "postgres", password: "" };
+  }
+}
+
+function AddConnectionModal({ onClose, onSave, editConn }: { onClose: () => void; onSave: (c: Connection) => void; editConn?: Connection }) {
+  const initial = editConn
+    ? { name: editConn.name, color: editConn.color, ...parseDsn(editConn.dsn) }
+    : { name: "", host: "localhost", port: "5432", database: "", user: "postgres", password: "", color: "#3b82f6" };
+  const [form, setForm] = useState(initial);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#ec4899"];
@@ -439,8 +476,8 @@ function AddConnectionModal({ onClose, onAdd }: { onClose: () => void; onAdd: (c
 
   const save = () => {
     if (!form.name || !form.host || !form.database) return;
-    onAdd({
-      id: Date.now().toString(), name: form.name, host: form.host, port: Number(form.port),
+    onSave({
+      id: editConn?.id ?? Date.now().toString(), name: form.name, host: form.host, port: Number(form.port),
       database: form.database, user: form.user, color: form.color,
       status: testResult?.ok ? "connected" : "disconnected", dsn: buildDsn(),
     });
@@ -454,7 +491,7 @@ function AddConnectionModal({ onClose, onAdd }: { onClose: () => void; onAdd: (c
       <div className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg w-[420px] shadow-2xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
           <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Icon name="Plus" size={14} className="text-[hsl(var(--primary))]" />Новое подключение
+            <Icon name={editConn ? "Pencil" : "Plus"} size={14} className="text-[hsl(var(--primary))]" />{editConn ? "Редактировать подключение" : "Новое подключение"}
           </h2>
           <button onClick={onClose} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors">
             <Icon name="X" size={16} />
@@ -525,6 +562,8 @@ export default function Index() {
   const [activeConn, setActiveConn] = useState<string>(connections[0]?.id ?? "");
   const [activeView, setActiveView] = useState<ActiveView>({ type: "sql" });
   const [showAddConn, setShowAddConn] = useState(false);
+  const [editConn, setEditConn] = useState<Connection | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Connection | null>(null);
   const [tables, setTables] = useState<TableSchema[]>([]);
   const [tablesLoading, setTablesLoading] = useState(false);
   const [tablesError, setTablesError] = useState<string | null>(null);
@@ -559,6 +598,23 @@ export default function Index() {
   const updateConn = (id: string) => {
     setActiveConn(id);
     setActiveView({ type: "sql" });
+  };
+
+  const saveConnection = (c: Connection) => {
+    setConnections(prev => {
+      const exists = prev.some(x => x.id === c.id);
+      return exists ? prev.map(x => x.id === c.id ? c : x) : [...prev, c];
+    });
+    setActiveConn(c.id);
+  };
+
+  const deleteConnection = (c: Connection) => {
+    setConnections(prev => {
+      const next = prev.filter(x => x.id !== c.id);
+      if (activeConn === c.id) setActiveConn(next[0]?.id ?? "");
+      return next;
+    });
+    setConfirmDelete(null);
   };
 
   return (
@@ -604,7 +660,14 @@ export default function Index() {
           </div>
           <div className="flex-1 overflow-y-auto py-1">
             {connections.map(c => (
-              <ConnectionItem key={c.id} conn={c} selected={activeConn === c.id} onClick={() => updateConn(c.id)} />
+              <ConnectionItem
+                key={c.id}
+                conn={c}
+                selected={activeConn === c.id}
+                onClick={() => updateConn(c.id)}
+                onEdit={() => setEditConn(c)}
+                onDelete={() => setConfirmDelete(c)}
+              />
             ))}
           </div>
         </div>
@@ -703,11 +766,31 @@ export default function Index() {
         <span>{new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}</span>
       </div>
 
-      {showAddConn && (
+      {(showAddConn || editConn) && (
         <AddConnectionModal
-          onClose={() => setShowAddConn(false)}
-          onAdd={c => { setConnections(p => [...p, c]); setActiveConn(c.id); }}
+          editConn={editConn ?? undefined}
+          onClose={() => { setShowAddConn(false); setEditConn(null); }}
+          onSave={saveConnection}
         />
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg w-[340px] shadow-2xl">
+            <div className="px-4 py-3 border-b border-[hsl(var(--border))]">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <Icon name="AlertTriangle" size={14} className="text-red-400" />Удалить сервер?
+              </h2>
+            </div>
+            <div className="p-4 text-xs text-[hsl(var(--muted-foreground))]">
+              Подключение <span className="font-mono-app text-[hsl(var(--foreground))]">{confirmDelete.name}</span> будет удалено из списка. База данных не пострадает.
+            </div>
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[hsl(var(--border))]">
+              <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors">Отмена</button>
+              <button onClick={() => deleteConnection(confirmDelete)} className="px-3 py-1.5 text-xs bg-red-500 text-white rounded font-medium hover:opacity-90 transition-opacity">Удалить</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
